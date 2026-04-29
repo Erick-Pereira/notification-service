@@ -7,16 +7,16 @@ using Simcag.Shared.Messaging.Contracts;
 
 namespace Simcag.NotificationService.Application.Workers;
 
-public sealed class AlertCreatedEventConsumer : BackgroundService
+public sealed class AlertTriggeredEventConsumer : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<AlertCreatedEventConsumer> _logger;
-    private readonly IEventConsumer<AlertCreatedEvent> _eventConsumer;
+    private readonly ILogger<AlertTriggeredEventConsumer> _logger;
+    private readonly IEventConsumer<AlertTriggeredEvent> _eventConsumer;
 
-    public AlertCreatedEventConsumer(
+    public AlertTriggeredEventConsumer(
         IServiceScopeFactory scopeFactory,
-        ILogger<AlertCreatedEventConsumer> logger,
-        IEventConsumer<AlertCreatedEvent> eventConsumer)
+        ILogger<AlertTriggeredEventConsumer> logger,
+        IEventConsumer<AlertTriggeredEvent> eventConsumer)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -25,7 +25,7 @@ public sealed class AlertCreatedEventConsumer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Starting {Consumer} (queue alerts / AlertCreatedEvent)", nameof(AlertCreatedEventConsumer));
+        _logger.LogInformation("Starting {Consumer} (alert-triggered-events)", nameof(AlertTriggeredEventConsumer));
         await foreach (var messageEnvelope in _eventConsumer.ReadMessagesAsync(stoppingToken))
         {
             using var scope = _scopeFactory.CreateScope();
@@ -34,7 +34,7 @@ public sealed class AlertCreatedEventConsumer : BackgroundService
             if (alert.UserId is null || alert.UserId == Guid.Empty)
             {
                 _logger.LogWarning(
-                    "AlertCreatedEvent sem UserId (AlertId {AlertId}). Nada enviado; ack para evitar reprocessar.",
+                    "AlertTriggeredEvent sem UserId (alertId {AlertId}). Mensagem descartada.",
                     alert.AlertId);
                 await _eventConsumer.AcknowledgeMessageAsync(messageEnvelope, stoppingToken);
                 continue;
@@ -45,15 +45,14 @@ public sealed class AlertCreatedEventConsumer : BackgroundService
                 var dto = AlertEventMapping.ToDto(alert);
                 await notificationService.SendAlertNotificationAsync(dto, stoppingToken);
                 await _eventConsumer.AcknowledgeMessageAsync(messageEnvelope, stoppingToken);
-                _logger.LogInformation("AlertCreatedEvent processado (AlertId {AlertId}, ProductId {ProductId})", alert.AlertId, alert.ProductId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Falha ao processar AlertCreatedEvent (ProductId {ProductId})", alert.ProductId);
+                _logger.LogError(ex, "Falha ao processar AlertTriggeredEvent para o alerta {AlertId}", alert.AlertId);
                 await _eventConsumer.RejectMessageAsync(messageEnvelope, stoppingToken);
             }
         }
 
-        _logger.LogInformation("Consumer {Name} finalizado", nameof(AlertCreatedEventConsumer));
+        _logger.LogInformation("Consumer {Name} finalizado", nameof(AlertTriggeredEventConsumer));
     }
 }

@@ -2,11 +2,11 @@
   "profiles": {
     "Simcag.NotificationService.Api": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "applicationUrl": "https://localhost:55968;http://localhost:55969"
+      "applicationUrl": "http://localhost:5005"
     }
   }
 }

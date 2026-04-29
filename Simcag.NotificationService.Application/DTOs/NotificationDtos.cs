@@ -3,8 +3,14 @@ namespace Simcag.NotificationService.Application.DTOs;
 public class AlertNotificationDto
 {
     public Guid UserId { get; init; }
-    public string ProductName { get; init; } = string.Empty;
+    public string? AlertId { get; init; }
+    public string? ProductName { get; init; } = string.Empty;
+    public string? ProductId { get; init; }
     public string AlertType { get; init; } = string.Empty;
+    public string? AlertCategory { get; init; }
+    public string? Message { get; init; }
+    public string? Severity { get; init; }
+    public Guid? TenantId { get; init; }
     public decimal CurrentPrice { get; init; }
     public decimal PriceChange { get; init; }
     public string Source { get; init; } = string.Empty;
@@ -21,18 +27,16 @@ public class UpdatePreferencesDto
     public bool? AlertDropEnabled { get; init; }
     public bool? AlertRiseEnabled { get; init; }
     public bool? AlertTrendEnabled { get; init; }
+    public string? MinimumSeverity { get; init; }
 }
 
-public class NotificationResponseDto
+public class SendNotificationRequestDto
 {
-    public Guid Id { get; init; }
-    public string Type { get; init; } = string.Empty;
-    public string Channel { get; init; } = string.Empty;
-    public string Recipient { get; init; } = string.Empty;
+    public Guid UserId { get; init; }
+    /// <summary>Se vazio, envia e-mail (se ativo) e em seguida SMS se e-mail indisponível (fallback).</summary>
+    public string? Channel { get; init; }
     public string Subject { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
-    public DateTime? SentAt { get; init; }
-    public DateTime CreatedAt { get; init; }
+    public string Body { get; init; } = string.Empty;
 }
 
 public class PreferencesResponseDto
@@ -45,4 +49,5 @@ public class PreferencesResponseDto
     public bool AlertDropEnabled { get; init; }
     public bool AlertRiseEnabled { get; init; }
     public bool AlertTrendEnabled { get; init; }
+    public string MinimumSeverity { get; init; } = "Info";
 }

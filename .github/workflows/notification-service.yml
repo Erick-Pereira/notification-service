@@ -1,0 +1,48 @@
+name: notification-service
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "notification-service/**"
+      - "shared/**"
+      - ".github/workflows/notification-service.yml"
+  pull_request:
+    paths:
+      - "notification-service/**"
+      - "shared/**"
+      - ".github/workflows/notification-service.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Test
+        run: dotnet test notification-service/Simcag.NotificationService.Tests/Simcag.NotificationService.Tests.csproj -c Release
+
+  build-and-push:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          context: .
+          file: notification-service/Simcag.NotificationService.Api/Dockerfile
+          tags: shelow/notification-service:latest

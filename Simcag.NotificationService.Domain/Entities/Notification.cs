@@ -1,3 +1,5 @@
+using Simcag.NotificationService.Domain.ValueObjects;
+
 namespace Simcag.NotificationService.Domain.Entities;
 
 public class Notification
@@ -39,6 +41,58 @@ public class Notification
     public static Notification Create(Guid userId, string type, string channel, string recipient, string subject, string body)
         => new(userId, type, channel, recipient, subject, body);
 
+    /// <summary>Reconstrução a partir do armazenamento (EF, etc.).</summary>
+    public static Notification Rehydrate(
+        Guid id,
+        Guid userId,
+        string type,
+        string channel,
+        string recipient,
+        string subject,
+        string body,
+        string status,
+        DateTime? sentAt,
+        string? errorMessage,
+        DateTime createdAt) =>
+        new(
+            id,
+            userId,
+            type,
+            channel,
+            recipient,
+            subject,
+            body,
+            status,
+            sentAt,
+            errorMessage,
+            createdAt);
+
+    private Notification(
+        Guid id,
+        Guid userId,
+        string type,
+        string channel,
+        string recipient,
+        string subject,
+        string body,
+        string status,
+        DateTime? sentAt,
+        string? errorMessage,
+        DateTime createdAt)
+    {
+        Id = id;
+        UserId = userId;
+        Type = type;
+        Channel = channel;
+        Recipient = recipient;
+        Subject = subject;
+        Body = body;
+        Status = status;
+        SentAt = sentAt;
+        ErrorMessage = errorMessage;
+        CreatedAt = createdAt;
+    }
+
     public void MarkAsSent()
     {
         Status = "Sent";
@@ -63,6 +117,10 @@ public class NotificationPreference
     public bool AlertDropEnabled { get; private set; } = true;
     public bool AlertRiseEnabled { get; private set; } = true;
     public bool AlertTrendEnabled { get; private set; } = true;
+    /// <summary>
+    /// Notificações com severidade abaixo deste mínimo são ignoradas (Info, Warning, Critical).
+    /// </summary>
+    public string MinimumSeverity { get; private set; } = AlertSeverityLevel.Info;
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 
@@ -82,12 +140,68 @@ public class NotificationPreference
         AlertDropEnabled = true;
         AlertRiseEnabled = true;
         AlertTrendEnabled = true;
+        MinimumSeverity = AlertSeverityLevel.Info;
         CreatedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
     }
 
     public static NotificationPreference Create(Guid userId, string? emailAddress = null, string? phoneNumber = null)
         => new(userId, emailAddress, phoneNumber);
+
+    public static NotificationPreference Rehydrate(
+        Guid id,
+        Guid userId,
+        bool emailEnabled,
+        bool smsEnabled,
+        string? emailAddress,
+        string? phoneNumber,
+        bool alertDropEnabled,
+        bool alertRiseEnabled,
+        bool alertTrendEnabled,
+        string minimumSeverity,
+        DateTime createdAt,
+        DateTime updatedAt) =>
+        new(
+            id,
+            userId,
+            emailEnabled,
+            smsEnabled,
+            emailAddress,
+            phoneNumber,
+            alertDropEnabled,
+            alertRiseEnabled,
+            alertTrendEnabled,
+            minimumSeverity,
+            createdAt,
+            updatedAt);
+
+    private NotificationPreference(
+        Guid id,
+        Guid userId,
+        bool emailEnabled,
+        bool smsEnabled,
+        string? emailAddress,
+        string? phoneNumber,
+        bool alertDropEnabled,
+        bool alertRiseEnabled,
+        bool alertTrendEnabled,
+        string minimumSeverity,
+        DateTime createdAt,
+        DateTime updatedAt)
+    {
+        Id = id;
+        UserId = userId;
+        EmailEnabled = emailEnabled;
+        SmsEnabled = smsEnabled;
+        EmailAddress = emailAddress;
+        PhoneNumber = phoneNumber;
+        AlertDropEnabled = alertDropEnabled;
+        AlertRiseEnabled = alertRiseEnabled;
+        AlertTrendEnabled = alertTrendEnabled;
+        MinimumSeverity = minimumSeverity;
+        CreatedAt = createdAt;
+        UpdatedAt = updatedAt;
+    }
 
     public void UpdatePreferences(bool emailEnabled, bool smsEnabled, string? emailAddress, string? phoneNumber)
     {
@@ -105,4 +219,25 @@ public class NotificationPreference
         AlertTrendEnabled = trendEnabled;
         UpdatedAt = DateTime.UtcNow;
     }
+
+    public void UpdateMinimumSeverity(string? minimumSeverity)
+    {
+        if (string.IsNullOrWhiteSpace(minimumSeverity))
+        {
+            MinimumSeverity = AlertSeverityLevel.Info;
+        }
+        else
+        {
+            var s = minimumSeverity.Trim();
+            MinimumSeverity = s.Equals(AlertSeverityLevel.Warning, StringComparison.OrdinalIgnoreCase)
+                || s.Equals(AlertSeverityLevel.Critical, StringComparison.OrdinalIgnoreCase)
+                || s.Equals(AlertSeverityLevel.Info, StringComparison.OrdinalIgnoreCase)
+                ? s
+                : AlertSeverityLevel.Info;
+        }
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public bool IsSeverityEnabled(string? eventSeverity) =>
+        AlertSeverityLevel.MeetsMinimum(eventSeverity, MinimumSeverity);
 }

@@ -12,16 +12,27 @@ public class SmtpEmailProvider : IEmailProvider
     private readonly ILogger<SmtpEmailProvider> _logger;
     private readonly SmtpSettings _settings;
 
+    private static string? FirstNonEmpty(params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            var v = Environment.GetEnvironmentVariable(k);
+            if (!string.IsNullOrWhiteSpace(v))
+                return v;
+        }
+        return null;
+    }
+
     public SmtpEmailProvider(ILogger<SmtpEmailProvider> logger)
     {
         _logger = logger;
         _settings = new SmtpSettings
         {
-            Host = Environment.GetEnvironmentVariable("SMTP__HOST") ?? "smtp.gmail.com",
-            Port = int.Parse(Environment.GetEnvironmentVariable("SMTP__PORT") ?? "587"),
-            UserName = Environment.GetEnvironmentVariable("SMTP__USERNAME") ?? "",
-            Password = Environment.GetEnvironmentVariable("SMTP__PASSWORD") ?? "",
-            EnableSsl = bool.Parse(Environment.GetEnvironmentVariable("SMTP__ENABLESSL") ?? "true")
+            Host = FirstNonEmpty("SMTP__HOST", "SMTP_HOST") ?? "smtp.gmail.com",
+            Port = int.Parse(FirstNonEmpty("SMTP__PORT", "SMTP_PORT") ?? "587"),
+            UserName = FirstNonEmpty("SMTP__USERNAME", "SMTP_USER") ?? "",
+            Password = FirstNonEmpty("SMTP__PASSWORD", "SMTP_PASS", "SMTP__PASS") ?? "",
+            EnableSsl = bool.Parse(FirstNonEmpty("SMTP__ENABLESSL", "SMTP_ENABLESSL") ?? "true")
         };
     }
 
@@ -76,14 +87,25 @@ public class TwilioSmsProvider : ISmsProvider
     private readonly ILogger<TwilioSmsProvider> _logger;
     private readonly TwilioSettings _settings;
 
+    private static string? FirstNonEmpty(params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            var v = Environment.GetEnvironmentVariable(k);
+            if (!string.IsNullOrWhiteSpace(v))
+                return v;
+        }
+        return null;
+    }
+
     public TwilioSmsProvider(ILogger<TwilioSmsProvider> logger)
     {
         _logger = logger;
         _settings = new TwilioSettings
         {
-            AccountSid = Environment.GetEnvironmentVariable("TWILIO__ACCOUNTSID") ?? "",
-            AuthToken = Environment.GetEnvironmentVariable("TWILIO__AUTHTOKEN") ?? "",
-            FromNumber = Environment.GetEnvironmentVariable("TWILIO__FROMNUMBER") ?? ""
+            AccountSid = FirstNonEmpty("TWILIO__ACCOUNTSID", "SMS_PROVIDER_ACCOUNTSID") ?? "",
+            AuthToken = FirstNonEmpty("TWILIO__AUTHTOKEN", "SMS_PROVIDER_API_KEY", "SMS_PROVIDER_AUTHTOKEN") ?? "",
+            FromNumber = FirstNonEmpty("TWILIO__FROMNUMBER", "SMS_PROVIDER_FROM") ?? ""
         };
     }
 

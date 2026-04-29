@@ -1,51 +1,74 @@
 using Simcag.NotificationService.Application.Services;
 using Simcag.NotificationService.Application.Workers;
-using Simcag.NotificationService.Domain.Entities;
-using Simcag.NotificationService.Domain.Interfaces;
-using Simcag.NotificationService.Infrastructure.Providers;
-using Simcag.Shared.Messaging.Configuration;
-using Simcag.Shared.Messaging.Contracts;
+using Simcag.NotificationService.Infrastructure.DependencyInjection;
 using Simcag.Shared.Events;
+using Simcag.Shared.Messaging.Configuration;
 using Simcag.Shared.Messaging.Extensions;
 
 DotNetEnv.Env.Load();
-
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddEnvironmentVariables();
+
+static string? GetEnv(params string[] keys)
+{
+    foreach (var k in keys)
+    {
+        var v = Environment.GetEnvironmentVariable(k);
+        if (!string.IsNullOrWhiteSpace(v))
+            return v;
+    }
+    return null;
+}
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "SIMC-AG Service", Version = "v1" });
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.OpenApiSecurityScheme
+    {
+        Name        = "Authorization",
+        In          = Microsoft.OpenApi.ParameterLocation.Header,
+        Type        = Microsoft.OpenApi.SecuritySchemeType.Http,
+        Scheme      = "bearer",
+        BearerFormat = "JWT",
+        Description = "Cole apenas o JWT (sem 'Bearer ')."
+    });
+    c.AddSecurityRequirement(document => new Microsoft.OpenApi.OpenApiSecurityRequirement
+    {
+        [new Microsoft.OpenApi.OpenApiSecuritySchemeReference("Bearer", document)] = []
+    });
+});
+
+builder.Services.AddNotificationInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddSingleton<IEmailProvider, SmtpEmailProvider>();
-builder.Services.AddSingleton<ISmsProvider, TwilioSmsProvider>();
-builder.Services.AddSingleton<INotificationRepository, MockNotificationRepository>();
-builder.Services.AddSingleton<INotificationPreferenceRepository, MockNotificationPreferenceRepository>();
-
 builder.Services.AddHealthChecks();
-
-// RabbitMQ Configuration
-var rabbitMqHost = Environment.GetEnvironmentVariable("RABBITMQ__HOST") ?? "localhost";
-var rabbitMqPort = int.Parse(Environment.GetEnvironmentVariable("RABBITMQ__PORT") ?? "5672");
-var rabbitMqUserName = Environment.GetEnvironmentVariable("RABBITMQ__USERNAME") ?? "guest";
-var rabbitMqPassword = Environment.GetEnvironmentVariable("RABBITMQ__PASSWORD") ?? "guest";
 
 var rabbitMqOptions = new RabbitMqOptions
 {
-    Host = rabbitMqHost,
-    Port = rabbitMqPort,
-    UserName = rabbitMqUserName,
-    Password = rabbitMqPassword,
-    VirtualHost = "/"
+    Host = GetEnv("RABBITMQ__HOST", "RABBITMQ_HOST") ?? "localhost",
+    Port = int.Parse(GetEnv("RABBITMQ__PORT", "RABBITMQ_PORT") ?? "5672"),
+    UserName = GetEnv("RABBITMQ__USERNAME", "RABBITMQ_USERNAME") ?? "guest",
+    Password = GetEnv("RABBITMQ__PASSWORD", "RABBITMQ_PASSWORD") ?? "guest",
+    VirtualHost = GetEnv("RABBITMQ__VIRTUALHOST", "RABBITMQ_VIRTUALHOST") ?? "/"
 };
 
 builder.Services.AddRabbitMqMessaging(rabbitMqOptions);
-builder.Services.AddRabbitMqEventConsumer<AlertCreatedEvent>("alerts");
 
-// Background Services
+var triggeredQueue = GetEnv("RABBITMQ_QUEUE_ALERT_TRIGGERED", "RABBITMQ__QUEUE_ALERT_TRIGGERED")
+    ?? "alert-triggered-events";
+var createdQueue = GetEnv("RABBITMQ_QUEUE_ALERT_CREATED", "RABBITMQ__QUEUE_ALERT_CREATED")
+    ?? "alerts";
+
+builder.Services.AddRabbitMqEventConsumer<AlertTriggeredEvent>(triggeredQueue);
+builder.Services.AddRabbitMqEventConsumer<AlertCreatedEvent>(createdQueue);
+
+builder.Services.AddHostedService<AlertTriggeredEventConsumer>();
 builder.Services.AddHostedService<AlertCreatedEventConsumer>();
 
 var app = builder.Build();
+app.RunNotificationMigrationsOnStartup();
 
 if (app.Environment.IsDevelopment())
 {
@@ -59,21 +82,3 @@ app.MapControllers();
 app.MapHealthChecks("/health");
 
 app.Run();
-
-public class MockNotificationRepository : INotificationRepository
-{
-    private readonly List<Notification> _notifications = new();
-    public Task AddAsync(Notification notification, CancellationToken ct) { _notifications.Add(notification); return Task.CompletedTask; }
-    public Task<Notification?> GetByIdAsync(Guid id, CancellationToken ct) => Task.FromResult(_notifications.FirstOrDefault(n => n.Id == id));
-    public Task<IEnumerable<Notification>> GetByUserIdAsync(Guid userId, int limit, CancellationToken ct) => Task.FromResult<IEnumerable<Notification>>(_notifications.Where(n => n.UserId == userId).Take(limit));
-    public Task<IEnumerable<Notification>> GetPendingAsync(int limit, CancellationToken ct) => Task.FromResult<IEnumerable<Notification>>(_notifications.Where(n => n.Status == "Pending").Take(limit));
-    public Task UpdateAsync(Notification notification, CancellationToken ct) => Task.CompletedTask;
-}
-
-public class MockNotificationPreferenceRepository : INotificationPreferenceRepository
-{
-    private readonly List<NotificationPreference> _preferences = new();
-    public Task<NotificationPreference?> GetByUserIdAsync(Guid userId, CancellationToken ct) => Task.FromResult(_preferences.FirstOrDefault(p => p.UserId == userId));
-    public Task AddAsync(NotificationPreference preference, CancellationToken ct) { _preferences.Add(preference); return Task.CompletedTask; }
-    public Task UpdateAsync(NotificationPreference preference, CancellationToken ct) => Task.CompletedTask;
-}
