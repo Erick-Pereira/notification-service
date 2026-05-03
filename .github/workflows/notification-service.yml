@@ -1,48 +1,49 @@
+# Secrets: DOCKER_USERNAME, DOCKER_PASSWORD, TOKEN
+
 name: notification-service
 
 on:
   push:
-    branches: [main, master]
-    paths:
-      - "notification-service/**"
-      - "shared/**"
-      - ".github/workflows/notification-service.yml"
-  pull_request:
-    paths:
-      - "notification-service/**"
-      - "shared/**"
-      - ".github/workflows/notification-service.yml"
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-      - name: Test
-        run: dotnet test notification-service/Simcag.NotificationService.Tests/Simcag.NotificationService.Tests.csproj -c Release
+      - name: GitHub Packages (Simcag.Shared)
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          dotnet nuget remove source github 2>/dev/null || true
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --name github \
+            --username "${{ github.repository_owner }}" \
+            --password "${TOKEN}" \
+            --store-password-in-clear-text
+      - name: Run tests
+        run: dotnet test Simcag.NotificationService.Tests/Simcag.NotificationService.Tests.csproj -c Release
 
   build-and-push:
-    needs: test
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           push: true
-          context: .
-          file: notification-service/Simcag.NotificationService.Api/Dockerfile
           tags: shelow/notification-service:latest
+          context: .
+          file: Simcag.NotificationService.Api/Dockerfile
+          build-args: |
+            TOKEN=${{ secrets.TOKEN }}
+            NUGET_GITHUB_OWNER=${{ github.repository_owner }}
