@@ -4,9 +4,12 @@ using Simcag.NotificationService.Infrastructure.DependencyInjection;
 using Simcag.Shared.Events;
 using Simcag.Shared.Messaging.Configuration;
 using Simcag.Shared.Messaging.Extensions;
+using Simcag.Shared.Hosting;
 
-DotNetEnv.Env.Load();
+DotNetEnv.Env.NoClobber().Load();
+ContainerListenConfiguration.NormalizeAspNetCoreListenUrlsInContainer();
 var builder = WebApplication.CreateBuilder(args);
+ContainerListenConfiguration.ApplyDockerListenUrls(builder);
 builder.Configuration.AddEnvironmentVariables();
 
 static string? GetEnv(params string[] keys)
