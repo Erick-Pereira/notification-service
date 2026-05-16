@@ -51,6 +51,7 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.False(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -68,6 +69,7 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.False(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -84,9 +86,7 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.False(result);
-        _emailProviderMock.Verify(
-            p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -105,6 +105,8 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.True(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
+        _notificationRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
         _emailProviderMock.Verify(p => p.SendAsync("test@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -124,6 +126,8 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.True(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
+        _notificationRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
         _smsProviderMock.Verify(p => p.SendAsync("+1234567890", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -143,6 +147,8 @@ public class NotificationServiceTests
         var result = await _service.SendAlertNotificationAsync(alert);
 
         Assert.False(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
+        _notificationRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

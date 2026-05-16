@@ -5,11 +5,13 @@ using Simcag.Shared.Events;
 using Simcag.Shared.Messaging.Configuration;
 using Simcag.Shared.Messaging.Extensions;
 using Simcag.Shared.Hosting;
+using Simcag.Shared.Telemetry;
 
 DotNetEnv.Env.NoClobber().Load();
 ContainerListenConfiguration.NormalizeAspNetCoreListenUrlsInContainer();
 var builder = WebApplication.CreateBuilder(args);
 ContainerListenConfiguration.ApplyDockerListenUrls(builder);
+builder.AddSimcagDistributedTelemetry("Simcag.NotificationService");
 builder.Configuration.AddEnvironmentVariables();
 
 static string? GetEnv(params string[] keys)
@@ -56,6 +58,7 @@ var rabbitMqOptions = new RabbitMqOptions
     Password = GetEnv("RABBITMQ__PASSWORD", "RABBITMQ_PASSWORD") ?? "guest",
     VirtualHost = GetEnv("RABBITMQ__VIRTUALHOST", "RABBITMQ_VIRTUALHOST") ?? "/"
 };
+rabbitMqOptions.ApplyMessageSigningFromEnvironment();
 
 builder.Services.AddRabbitMqMessaging(rabbitMqOptions);
 
@@ -71,6 +74,9 @@ builder.Services.AddHostedService<AlertTriggeredEventConsumer>();
 builder.Services.AddHostedService<AlertCreatedEventConsumer>();
 
 var app = builder.Build();
+
+app.UseSimcagHttpCorrelationActivityTags();
+
 app.RunNotificationMigrationsOnStartup();
 
 if (app.Environment.IsDevelopment())
@@ -83,5 +89,7 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
+
+app.UseSimcagTelemetryEndpoints();
 
 app.Run();

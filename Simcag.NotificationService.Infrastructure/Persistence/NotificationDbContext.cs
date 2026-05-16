@@ -20,6 +20,8 @@ public sealed class NotificationDbContext : DbContext
             b.HasKey(x => x.Id);
             b.HasIndex(x => x.UserId);
             b.HasIndex(x => new { x.UserId, x.CreatedAt });
+            b.HasIndex(x => new { x.UserId, x.Status });
+            b.HasIndex(x => x.CorrelationId);
         });
 
         modelBuilder.Entity<NotificationPreferenceRecord>(b =>

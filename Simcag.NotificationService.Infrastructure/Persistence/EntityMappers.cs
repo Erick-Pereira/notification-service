@@ -16,7 +16,17 @@ internal static class EntityMappers
             r.Status,
             r.SentAt,
             r.ErrorMessage,
-            r.CreatedAt);
+            r.CreatedAt,
+            r.Source,
+            r.CorrelationId,
+            r.Severity,
+            r.TenantId,
+            r.AlertId,
+            r.ContextJson,
+            r.PayloadSummary,
+            r.OperationalLink,
+            r.RetryCount,
+            r.UpdatedAtUtc);
 
     public static NotificationRecord ToRecord(Domain.Entities.Notification n) =>
         new()
@@ -31,7 +41,17 @@ internal static class EntityMappers
             Status = n.Status,
             SentAt = n.SentAt,
             ErrorMessage = n.ErrorMessage,
-            CreatedAt = n.CreatedAt
+            CreatedAt = n.CreatedAt,
+            Source = n.Source,
+            CorrelationId = n.CorrelationId,
+            Severity = n.Severity,
+            TenantId = n.TenantId,
+            AlertId = n.AlertId,
+            ContextJson = n.ContextJson,
+            PayloadSummary = n.PayloadSummary,
+            OperationalLink = n.OperationalLink,
+            RetryCount = n.RetryCount,
+            UpdatedAtUtc = n.UpdatedAtUtc,
         };
 
     public static NotificationPreference ToDomain(NotificationPreferenceRecord r) =>
@@ -46,6 +66,8 @@ internal static class EntityMappers
             r.AlertRiseEnabled,
             r.AlertTrendEnabled,
             r.MinimumSeverity,
+            r.MuteAllUntilUtc,
+            r.SnoozePriceAlertsUntilUtc,
             r.CreatedAt,
             r.UpdatedAt);
 
@@ -62,7 +84,9 @@ internal static class EntityMappers
             AlertRiseEnabled = p.AlertRiseEnabled,
             AlertTrendEnabled = p.AlertTrendEnabled,
             MinimumSeverity = p.MinimumSeverity,
+            MuteAllUntilUtc = p.MuteAllUntilUtc,
+            SnoozePriceAlertsUntilUtc = p.SnoozePriceAlertsUntilUtc,
             CreatedAt = p.CreatedAt,
-            UpdatedAt = p.UpdatedAt
+            UpdatedAt = p.UpdatedAt,
         };
 }

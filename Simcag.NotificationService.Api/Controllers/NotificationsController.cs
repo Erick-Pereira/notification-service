@@ -38,8 +38,45 @@ public class NotificationsController : ControllerBase
             AlertDropEnabled = preferences.AlertDropEnabled,
             AlertRiseEnabled = preferences.AlertRiseEnabled,
             AlertTrendEnabled = preferences.AlertTrendEnabled,
-            MinimumSeverity = preferences.MinimumSeverity
+            MinimumSeverity = preferences.MinimumSeverity,
+            MuteAllUntilUtc = preferences.MuteAllUntilUtc,
+            SnoozePriceAlertsUntilUtc = preferences.SnoozePriceAlertsUntilUtc,
         });
+    }
+
+    [HttpGet("governance")]
+    public ApiResponse<NotificationGovernanceDto> Governance() =>
+        ApiResponse<NotificationGovernanceDto>.Ok(_notificationService.GetGovernanceCatalog());
+
+    [HttpGet("templates")]
+    public ApiResponse<IReadOnlyList<NotificationTemplateDto>> Templates() =>
+        ApiResponse<IReadOnlyList<NotificationTemplateDto>>.Ok(_notificationService.GetTemplates());
+
+    [HttpGet("operational/dashboard")]
+    public async Task<ApiResponse<NotificationDashboardDto>> OperationalDashboard([FromQuery] Guid userId, CancellationToken ct)
+    {
+        var d = await _notificationService.GetOperationalDashboardAsync(userId, ct);
+        return ApiResponse<NotificationDashboardDto>.Ok(d);
+    }
+
+    [HttpGet("deliveries")]
+    public async Task<ApiResponse<NotificationDeliveryPageDto>> Deliveries(
+        [FromQuery] Guid userId,
+        [FromQuery] string? status,
+        [FromQuery] string? channel,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        var d = await _notificationService.ListDeliveriesAsync(userId, status, channel, page, pageSize, ct);
+        return ApiResponse<NotificationDeliveryPageDto>.Ok(d);
+    }
+
+    [HttpPost("deliveries/{id:guid}/retry")]
+    public async Task<ApiResponse<bool>> RetryDelivery([FromRoute] Guid id, [FromQuery] Guid userId, CancellationToken ct)
+    {
+        var ok = await _notificationService.RetryDeliveryAsync(id, userId, ct);
+        return ApiResponse<bool>.Ok(ok);
     }
 
     [HttpGet("preferences")]

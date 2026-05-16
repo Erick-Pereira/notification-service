@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Simcag.NotificationService.Application.Abstractions;
 using Simcag.NotificationService.Application.DTOs;
+using Simcag.NotificationService.Application.Governance;
 using Simcag.NotificationService.Application.Mapping;
 using Simcag.NotificationService.Domain.Entities;
 using Simcag.NotificationService.Domain.Interfaces;
@@ -32,33 +34,128 @@ public sealed class NotificationService : INotificationService
         _logger = logger;
     }
 
+    public NotificationGovernanceDto GetGovernanceCatalog() => NotificationGovernanceCatalog.Build();
+
+    public IReadOnlyList<NotificationTemplateDto> GetTemplates() => NotificationGovernanceCatalog.Templates();
+
+    public async Task<NotificationDeliveryPageDto> ListDeliveriesAsync(
+        Guid userId,
+        string? status,
+        string? channel,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var (items, total) = await _notificationRepository
+            .GetDeliveriesPageAsync(userId, status, channel, page, pageSize, cancellationToken)
+            .ConfigureAwait(false);
+        return new NotificationDeliveryPageDto
+        {
+            Items = items.Select(ToDeliveryDto).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        };
+    }
+
+    public async Task<NotificationDashboardDto> GetOperationalDashboardAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var counts = await _notificationRepository.CountByStatusForUserAsync(userId, cancellationToken).ConfigureAwait(false);
+        int G(string key) => counts.TryGetValue(key, out var n) ? n : 0;
+        var total = counts.Values.Sum();
+        return new NotificationDashboardDto
+        {
+            Total = total,
+            Pending = G("Pending"),
+            Sent = G("Sent"),
+            Failed = G("Failed"),
+            Suppressed = G("Suppressed"),
+            Filtered = G("Filtered"),
+        };
+    }
+
+    public async Task<bool> RetryDeliveryAsync(Guid deliveryId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var n = await _notificationRepository.GetByIdAsync(deliveryId, cancellationToken).ConfigureAwait(false);
+        if (n == null || n.UserId != userId)
+            return false;
+        if (n.Channel is not ("Email" or "SMS"))
+            return false;
+        try
+        {
+            n.PrepareRetry();
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        await _notificationRepository.UpdateAsync(n, cancellationToken).ConfigureAwait(false);
+
+        if (n.Channel == "Email")
+        {
+            return await DispatchEmailForTrackedAsync(n, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await DispatchSmsForTrackedAsync(n, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<bool> SendAlertNotificationAsync(AlertNotificationDto alert, CancellationToken cancellationToken = default)
     {
-        var preferences = await _preferenceRepository.GetByUserIdAsync(alert.UserId, cancellationToken);
+        var utc = DateTime.UtcNow;
+        var productLabel = string.IsNullOrWhiteSpace(alert.ProductName) ? (alert.ProductId ?? "N/A") : alert.ProductName!;
+        var subject = $"Price Alert: {alert.AlertType} - {productLabel}";
+        var body = BuildAlertBody(alert, productLabel);
+        var contextJson = BuildContextJson(alert);
+        var summary = Truncate(alert.Message ?? subject, 480);
+        var opLink = BuildOperationalLink(alert);
+        const string eventSource = "AlertPipeline";
+
+        async Task RecordFilteredAsync(string reason) =>
+            await SaveFilteredAsync(
+                    alert.UserId,
+                    subject,
+                    body,
+                    reason,
+                    alert,
+                    contextJson,
+                    summary,
+                    opLink,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+        var preferences = await _preferenceRepository.GetByUserIdAsync(alert.UserId, cancellationToken).ConfigureAwait(false);
         if (preferences == null)
         {
-            _logger.LogWarning("No preferences found for user {UserId}", alert.UserId);
+            await RecordFilteredAsync("Sem preferências de contacto configuradas.").ConfigureAwait(false);
+            return false;
+        }
+
+        if (preferences.IsGloballyMuted(utc))
+        {
+            await RecordFilteredAsync("Mute global ativo até " + preferences.MuteAllUntilUtc!.Value.ToString("u")).ConfigureAwait(false);
+            return false;
+        }
+
+        if (preferences.IsPriceAlertSnoozed(utc))
+        {
+            await RecordFilteredAsync("Snooze de alertas de preço até " + preferences.SnoozePriceAlertsUntilUtc!.Value.ToString("u")).ConfigureAwait(false);
             return false;
         }
 
         if (!preferences.IsSeverityEnabled(alert.Severity))
         {
-            _logger.LogInformation(
-                "Severity {Severity} below user minimum {Min} for user {UserId}",
-                alert.Severity, preferences.MinimumSeverity, alert.UserId);
+            await RecordFilteredAsync($"Severidade abaixo do mínimo ({preferences.MinimumSeverity}).").ConfigureAwait(false);
             return false;
         }
 
-        var shouldNotify = ResolveShouldNotify(alert, preferences);
-        if (!shouldNotify)
+        if (!ResolveShouldNotify(alert, preferences))
         {
-            _logger.LogInformation("Alert type filtered for user {UserId} ({Type})", alert.UserId, alert.AlertType);
+            await RecordFilteredAsync($"Tipo de alerta desativado nas preferências ({alert.AlertType}).").ConfigureAwait(false);
             return false;
         }
-
-        var productLabel = string.IsNullOrWhiteSpace(alert.ProductName) ? (alert.ProductId ?? "N/A") : alert.ProductName!;
-        var subject = $"Price Alert: {alert.AlertType} - {productLabel}";
-        var body = BuildAlertBody(alert, productLabel);
 
         var success = true;
         var alertKeyBase = !string.IsNullOrWhiteSpace(alert.AlertId) ? alert.AlertId! : alert.OccurredAt.Ticks.ToString();
@@ -67,14 +164,33 @@ public sealed class NotificationService : INotificationService
         {
             var dedup = $"{alert.UserId}:alert:{alertKeyBase}:email";
             var rate = $"{alert.UserId}:email:alert";
-            if (await _sendPolicy.TryAcquireAsync(dedup, rate, cancellationToken))
+            var row = Notification.CreateOperational(
+                alert.UserId,
+                "PriceAlert",
+                "Email",
+                preferences.EmailAddress!,
+                subject,
+                body,
+                "Pending",
+                eventSource,
+                alert.CorrelationId,
+                alert.Severity,
+                alert.TenantId,
+                alert.AlertId,
+                contextJson,
+                summary,
+                opLink);
+            await _notificationRepository.AddAsync(row, cancellationToken).ConfigureAwait(false);
+
+            if (!await _sendPolicy.TryAcquireAsync(dedup, rate, cancellationToken).ConfigureAwait(false))
             {
-                success = await SendEmailInternalAsync(alert.UserId, "Email", preferences.EmailAddress!, subject, body, cancellationToken)
-                    && success;
+                row.MarkAsSuppressed("Deduplicação ou rate limit (Redis).");
+                await _notificationRepository.UpdateAsync(row, cancellationToken).ConfigureAwait(false);
+                _logger.LogDebug("Email skipped (deduplication or rate) for user {UserId}", alert.UserId);
             }
             else
             {
-                _logger.LogDebug("Email skipped (deduplication or rate) for user {UserId}", alert.UserId);
+                success = await DispatchEmailForTrackedAsync(row, cancellationToken).ConfigureAwait(false) && success;
             }
         }
 
@@ -85,18 +201,169 @@ public sealed class NotificationService : INotificationService
                 : Truncate(alert.Message!, 1400);
             var dedup = $"{alert.UserId}:alert:{alertKeyBase}:sms";
             var rate = $"{alert.UserId}:sms:alert";
-            if (await _sendPolicy.TryAcquireAsync(dedup, rate, cancellationToken))
+            var row = Notification.CreateOperational(
+                alert.UserId,
+                "PriceAlert",
+                "SMS",
+                preferences.PhoneNumber!,
+                string.Empty,
+                smsBody,
+                "Pending",
+                eventSource,
+                alert.CorrelationId,
+                alert.Severity,
+                alert.TenantId,
+                alert.AlertId,
+                contextJson,
+                summary,
+                opLink);
+            await _notificationRepository.AddAsync(row, cancellationToken).ConfigureAwait(false);
+
+            if (!await _sendPolicy.TryAcquireAsync(dedup, rate, cancellationToken).ConfigureAwait(false))
             {
-                success = await SendSmsInternalAsync(alert.UserId, "SMS", preferences.PhoneNumber!, smsBody, cancellationToken)
-                    && success;
+                row.MarkAsSuppressed("Deduplicação ou rate limit (Redis).");
+                await _notificationRepository.UpdateAsync(row, cancellationToken).ConfigureAwait(false);
+                _logger.LogDebug("SMS skipped (deduplication or rate) for user {UserId}", alert.UserId);
             }
             else
             {
-                _logger.LogDebug("SMS skipped (deduplication or rate) for user {UserId}", alert.UserId);
+                success = await DispatchSmsForTrackedAsync(row, cancellationToken).ConfigureAwait(false) && success;
             }
         }
 
         return success;
+    }
+
+    private async Task SaveFilteredAsync(
+        Guid userId,
+        string subject,
+        string body,
+        string reason,
+        AlertNotificationDto alert,
+        string contextJson,
+        string summary,
+        string opLink,
+        CancellationToken ct)
+    {
+        var row = Notification.CreateOperational(
+            userId,
+            "PriceAlert",
+            "Policy",
+            "-",
+            subject,
+            body,
+            "Pending",
+            "AlertPipeline",
+            alert.CorrelationId,
+            alert.Severity,
+            alert.TenantId,
+            alert.AlertId,
+            contextJson,
+            summary,
+            opLink);
+        row.MarkAsFiltered(reason);
+        await _notificationRepository.AddAsync(row, ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> DispatchEmailForTrackedAsync(Notification notification, CancellationToken ct)
+    {
+        try
+        {
+            var ok = await _emailProvider
+                .SendAsync(notification.Recipient, notification.Subject, notification.Body, ct)
+                .ConfigureAwait(false);
+            if (ok)
+            {
+                notification.MarkAsSent();
+                await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+                _logger.LogInformation("Email sent successfully to {Recipient}", notification.Recipient);
+                return true;
+            }
+
+            notification.MarkAsFailed("Provider returned false");
+            await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            notification.MarkAsFailed(ex.Message);
+            await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+            _logger.LogError(ex, "Failed to send email to {Recipient}", notification.Recipient);
+            return false;
+        }
+    }
+
+    private async Task<bool> DispatchSmsForTrackedAsync(Notification notification, CancellationToken ct)
+    {
+        try
+        {
+            var ok = await _smsProvider.SendAsync(notification.Recipient, notification.Body, ct).ConfigureAwait(false);
+            if (ok)
+            {
+                notification.MarkAsSent();
+                await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+                _logger.LogInformation("SMS sent successfully to {Recipient}", notification.Recipient);
+                return true;
+            }
+
+            notification.MarkAsFailed("Provider returned false");
+            await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            notification.MarkAsFailed(ex.Message);
+            await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
+            _logger.LogError(ex, "Failed to send SMS to {Recipient}", notification.Recipient);
+            return false;
+        }
+    }
+
+    private static NotificationDeliveryDto ToDeliveryDto(Notification n) =>
+        new()
+        {
+            Id = n.Id,
+            UserId = n.UserId,
+            Type = n.Type,
+            Channel = n.Channel,
+            Recipient = n.Recipient,
+            Subject = n.Subject,
+            Body = n.Body,
+            Status = n.Status,
+            Source = n.Source,
+            CorrelationId = n.CorrelationId,
+            Severity = n.Severity,
+            TenantId = n.TenantId,
+            AlertId = n.AlertId,
+            ContextJson = n.ContextJson,
+            PayloadSummary = n.PayloadSummary,
+            OperationalLink = n.OperationalLink,
+            RetryCount = n.RetryCount,
+            SentAt = n.SentAt,
+            ErrorMessage = n.ErrorMessage,
+            CreatedAt = n.CreatedAt,
+            UpdatedAtUtc = n.UpdatedAtUtc,
+        };
+
+    private static string BuildContextJson(AlertNotificationDto alert) =>
+        JsonSerializer.Serialize(
+            new
+            {
+                alert.AlertId,
+                alert.ProductId,
+                alert.AlertType,
+                alert.AlertCategory,
+                alert.TenantId,
+                alert.OccurredAt,
+            });
+
+    private static string BuildOperationalLink(AlertNotificationDto alert)
+    {
+        if (!string.IsNullOrWhiteSpace(alert.ProductId))
+            return $"/insights?productId={Uri.EscapeDataString(alert.ProductId)}";
+        if (!string.IsNullOrWhiteSpace(alert.AlertId))
+            return $"/alertas?alertId={Uri.EscapeDataString(alert.AlertId)}";
+        return "/alertas";
     }
 
     private static string BuildAlertBody(AlertNotificationDto alert, string productLabel)
@@ -141,7 +408,7 @@ public sealed class NotificationService : INotificationService
             "DROP" => preferences.AlertDropEnabled,
             "RISE" => preferences.AlertRiseEnabled,
             "TREND" => preferences.AlertTrendEnabled,
-            _ => false
+            _ => false,
         };
     }
 
@@ -150,11 +417,12 @@ public sealed class NotificationService : INotificationService
         var channel = (request.Channel ?? string.Empty).Trim();
         if (channel.Equals("email", StringComparison.OrdinalIgnoreCase))
         {
-            return await SendEmailAsync(request.UserId, request.Subject, request.Body, cancellationToken);
+            return await SendEmailAsync(request.UserId, request.Subject, request.Body, cancellationToken).ConfigureAwait(false);
         }
+
         if (channel.Equals("sms", StringComparison.OrdinalIgnoreCase))
         {
-            return await SendSmsAsync(request.UserId, request.Body, cancellationToken);
+            return await SendSmsAsync(request.UserId, request.Body, cancellationToken).ConfigureAwait(false);
         }
 
         if (await SendEmailAsync(request.UserId, request.Subject, request.Body, cancellationToken).ConfigureAwait(false))
@@ -167,36 +435,46 @@ public sealed class NotificationService : INotificationService
 
     public async Task<bool> SendEmailAsync(Guid userId, string subject, string body, CancellationToken cancellationToken = default)
     {
-        var preferences = await _preferenceRepository.GetByUserIdAsync(userId, cancellationToken);
+        var preferences = await _preferenceRepository.GetByUserIdAsync(userId, cancellationToken).ConfigureAwait(false);
+        if (preferences?.IsGloballyMuted(DateTime.UtcNow) == true)
+        {
+            return false;
+        }
+
         if (preferences?.EmailEnabled != true || string.IsNullOrWhiteSpace(preferences.EmailAddress))
         {
             return false;
         }
 
         var rate = $"{userId}:email:manual";
-        if (!await _sendPolicy.TryAcquireAsync(string.Empty, rate, cancellationToken))
+        if (!await _sendPolicy.TryAcquireAsync(string.Empty, rate, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        return await SendEmailInternalAsync(userId, "Email", preferences.EmailAddress, subject, body, cancellationToken);
+        return await SendEmailInternalAsync(userId, "Email", preferences.EmailAddress, subject, body, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> SendSmsAsync(Guid userId, string message, CancellationToken cancellationToken = default)
     {
-        var preferences = await _preferenceRepository.GetByUserIdAsync(userId, cancellationToken);
+        var preferences = await _preferenceRepository.GetByUserIdAsync(userId, cancellationToken).ConfigureAwait(false);
+        if (preferences?.IsGloballyMuted(DateTime.UtcNow) == true)
+        {
+            return false;
+        }
+
         if (preferences?.SmsEnabled != true || string.IsNullOrWhiteSpace(preferences.PhoneNumber))
         {
             return false;
         }
 
         var rate = $"{userId}:sms:manual";
-        if (!await _sendPolicy.TryAcquireAsync(string.Empty, rate, cancellationToken))
+        if (!await _sendPolicy.TryAcquireAsync(string.Empty, rate, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        return await SendSmsInternalAsync(userId, "SMS", preferences.PhoneNumber, message, cancellationToken);
+        return await SendSmsInternalAsync(userId, "SMS", preferences.PhoneNumber, message, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<bool> SendEmailInternalAsync(
@@ -208,27 +486,27 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken)
     {
         var notification = Notification.Create(userId, type, "Email", recipient, subject, body);
-        await _notificationRepository.AddAsync(notification, cancellationToken);
+        await _notificationRepository.AddAsync(notification, cancellationToken).ConfigureAwait(false);
 
         try
         {
-            var success = await _emailProvider.SendAsync(recipient, subject, body, cancellationToken);
+            var success = await _emailProvider.SendAsync(recipient, subject, body, cancellationToken).ConfigureAwait(false);
             if (success)
             {
                 notification.MarkAsSent();
-                await _notificationRepository.UpdateAsync(notification, cancellationToken);
+                await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Email sent successfully to {Recipient}", recipient);
                 return true;
             }
 
             notification.MarkAsFailed("Provider returned false");
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             return false;
         }
         catch (Exception ex)
         {
             notification.MarkAsFailed(ex.Message);
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send email to {Recipient}", recipient);
             return false;
         }
@@ -242,27 +520,27 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken)
     {
         var notification = Notification.Create(userId, type, "SMS", recipient, string.Empty, body);
-        await _notificationRepository.AddAsync(notification, cancellationToken);
+        await _notificationRepository.AddAsync(notification, cancellationToken).ConfigureAwait(false);
 
         try
         {
-            var success = await _smsProvider.SendAsync(recipient, body, cancellationToken);
+            var success = await _smsProvider.SendAsync(recipient, body, cancellationToken).ConfigureAwait(false);
             if (success)
             {
                 notification.MarkAsSent();
-                await _notificationRepository.UpdateAsync(notification, cancellationToken);
+                await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("SMS sent successfully to {Recipient}", recipient);
                 return true;
             }
 
             notification.MarkAsFailed("Provider returned false");
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             return false;
         }
         catch (Exception ex)
         {
             notification.MarkAsFailed(ex.Message);
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send SMS to {Recipient}", recipient);
             return false;
         }
@@ -273,7 +551,7 @@ public sealed class NotificationService : INotificationService
 
     public async Task UpdateUserPreferencesAsync(UpdatePreferencesDto preferences, CancellationToken cancellationToken = default)
     {
-        var existing = await _preferenceRepository.GetByUserIdAsync(preferences.UserId, cancellationToken);
+        var existing = await _preferenceRepository.GetByUserIdAsync(preferences.UserId, cancellationToken).ConfigureAwait(false);
         if (existing == null)
         {
             var newPreference = NotificationPreference.Create(
@@ -294,11 +572,18 @@ public sealed class NotificationService : INotificationService
                     preferences.AlertRiseEnabled ?? true,
                     preferences.AlertTrendEnabled ?? true);
             }
+
             if (preferences.MinimumSeverity is not null)
             {
                 newPreference.UpdateMinimumSeverity(preferences.MinimumSeverity);
             }
-            await _preferenceRepository.AddAsync(newPreference, cancellationToken);
+
+            if (preferences.ApplyMuteSnooze)
+            {
+                newPreference.UpdateMuteAndSnooze(preferences.MuteAllUntilUtc, preferences.SnoozePriceAlertsUntilUtc);
+            }
+
+            await _preferenceRepository.AddAsync(newPreference, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -316,11 +601,18 @@ public sealed class NotificationService : INotificationService
                     preferences.AlertRiseEnabled ?? existing.AlertRiseEnabled,
                     preferences.AlertTrendEnabled ?? existing.AlertTrendEnabled);
             }
+
             if (preferences.MinimumSeverity is not null)
             {
                 existing.UpdateMinimumSeverity(preferences.MinimumSeverity);
             }
-            await _preferenceRepository.UpdateAsync(existing, cancellationToken);
+
+            if (preferences.ApplyMuteSnooze)
+            {
+                existing.UpdateMuteAndSnooze(preferences.MuteAllUntilUtc, preferences.SnoozePriceAlertsUntilUtc);
+            }
+
+            await _preferenceRepository.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
         }
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Simcag.NotificationService.Application.Services;
 using Simcag.Shared.Events;
 using Simcag.Shared.Messaging.Contracts;
+using Simcag.Shared.Messaging.Telemetry;
 
 namespace Simcag.NotificationService.Application.Workers;
 
@@ -28,6 +29,8 @@ public sealed class AlertTriggeredEventConsumer : BackgroundService
         _logger.LogInformation("Starting {Consumer} (alert-triggered-events)", nameof(AlertTriggeredEventConsumer));
         await foreach (var messageEnvelope in _eventConsumer.ReadMessagesAsync(stoppingToken))
         {
+            using (MessagingConsumeTelemetry.BeginConsume(messageEnvelope, out _))
+            {
             using var scope = _scopeFactory.CreateScope();
             var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
             var alert = messageEnvelope.Data;
@@ -42,7 +45,7 @@ public sealed class AlertTriggeredEventConsumer : BackgroundService
 
             try
             {
-                var dto = AlertEventMapping.ToDto(alert);
+                var dto = AlertEventMapping.ToDto(alert, correlationId: messageEnvelope.CorrelationId);
                 await notificationService.SendAlertNotificationAsync(dto, stoppingToken);
                 await _eventConsumer.AcknowledgeMessageAsync(messageEnvelope, stoppingToken);
             }
@@ -50,6 +53,7 @@ public sealed class AlertTriggeredEventConsumer : BackgroundService
             {
                 _logger.LogError(ex, "Falha ao processar AlertTriggeredEvent para o alerta {AlertId}", alert.AlertId);
                 await _eventConsumer.RejectMessageAsync(messageEnvelope, stoppingToken);
+            }
             }
         }
 

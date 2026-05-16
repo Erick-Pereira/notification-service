@@ -5,7 +5,7 @@ namespace Simcag.NotificationService.Application.Workers;
 
 public static class AlertEventMapping
 {
-    public static AlertNotificationDto ToDto(AlertTriggeredEvent e) =>
+    public static AlertNotificationDto ToDto(AlertTriggeredEvent e, string? correlationId = null) =>
         new()
         {
             UserId = e.UserId ?? Guid.Empty,
@@ -20,10 +20,11 @@ public static class AlertEventMapping
             CurrentPrice = e.CurrentPrice,
             PriceChange = NormalizeDeviation(e.DeviationPercentage),
             Source = e.Source,
-            OccurredAt = e.OccurredAt
+            OccurredAt = e.OccurredAt,
+            CorrelationId = correlationId,
         };
 
-    public static AlertNotificationDto ToDto(AlertCreatedEvent e, Guid? explicitUserId = null)
+    public static AlertNotificationDto ToDto(AlertCreatedEvent e, Guid? explicitUserId = null, string? correlationId = null)
     {
         var userId = explicitUserId ?? e.UserId;
         return new()
@@ -39,7 +40,8 @@ public static class AlertEventMapping
             CurrentPrice = e.CurrentPrice ?? 0,
             PriceChange = NormalizePriceVariation(e.PriceVariation),
             Source = e.Source ?? "Unknown",
-            OccurredAt = e.OccurredAt
+            OccurredAt = e.OccurredAt,
+            CorrelationId = correlationId,
         };
     }
 
