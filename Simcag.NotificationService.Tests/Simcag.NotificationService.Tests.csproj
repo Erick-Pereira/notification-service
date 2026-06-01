@@ -9,6 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="6.12.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
     <PackageReference Include="Moq" Version="4.20.72" />
@@ -24,8 +26,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Simcag.NotificationService.Api\Simcag.NotificationService.Api.csproj" />
     <ProjectReference Include="..\Simcag.NotificationService.Application\Simcag.NotificationService.Application.csproj" />
     <ProjectReference Include="..\Simcag.NotificationService.Domain\Simcag.NotificationService.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
   </ItemGroup>
 
 </Project>

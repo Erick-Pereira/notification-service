@@ -17,7 +17,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.9.32" />
-    <PackageReference Include="Simcag.Shared" Version="1.0.5" />
+    <PackageReference Include="Simcag.Shared" Version="1.0.6" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Simcag.Shared.ErrorHandling;
 using Simcag.NotificationService.Application.Abstractions;
 using Simcag.NotificationService.Application.DTOs;
 using Simcag.NotificationService.Application.Governance;
@@ -286,7 +287,7 @@ public sealed class NotificationService : INotificationService
         }
         catch (Exception ex)
         {
-            notification.MarkAsFailed(ex.Message);
+            notification.MarkAsFailed(ErrorSanitizer.Sanitize(ex.Message));
             await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send email to {Recipient}", notification.Recipient);
             return false;
@@ -312,7 +313,7 @@ public sealed class NotificationService : INotificationService
         }
         catch (Exception ex)
         {
-            notification.MarkAsFailed(ex.Message);
+            notification.MarkAsFailed(ErrorSanitizer.Sanitize(ex.Message));
             await _notificationRepository.UpdateAsync(notification, ct).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send SMS to {Recipient}", notification.Recipient);
             return false;
@@ -505,7 +506,7 @@ public sealed class NotificationService : INotificationService
         }
         catch (Exception ex)
         {
-            notification.MarkAsFailed(ex.Message);
+            notification.MarkAsFailed(ErrorSanitizer.Sanitize(ex.Message));
             await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send email to {Recipient}", recipient);
             return false;
@@ -539,7 +540,7 @@ public sealed class NotificationService : INotificationService
         }
         catch (Exception ex)
         {
-            notification.MarkAsFailed(ex.Message);
+            notification.MarkAsFailed(ErrorSanitizer.Sanitize(ex.Message));
             await _notificationRepository.UpdateAsync(notification, cancellationToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to send SMS to {Recipient}", recipient);
             return false;

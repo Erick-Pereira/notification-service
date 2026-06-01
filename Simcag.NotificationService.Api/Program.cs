@@ -4,7 +4,9 @@ using Simcag.NotificationService.Infrastructure.DependencyInjection;
 using Simcag.Shared.Events;
 using Simcag.Shared.Messaging.Configuration;
 using Simcag.Shared.Messaging.Extensions;
+using Simcag.Shared.ErrorHandling;
 using Simcag.Shared.Hosting;
+using Simcag.Shared.Security;
 using Simcag.Shared.Telemetry;
 
 DotNetEnv.Env.NoClobber().Load();
@@ -13,6 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 ContainerListenConfiguration.ApplyDockerListenUrls(builder);
 builder.AddSimcagDistributedTelemetry("Simcag.NotificationService");
 builder.Configuration.AddEnvironmentVariables();
+var isTesting = builder.Environment.IsEnvironment("Testing");
 
 static string? GetEnv(params string[] keys)
 {
@@ -48,8 +51,10 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddNotificationInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks().AddSimcagLiveSelfCheck();
 
+if (!isTesting)
+{
 var rabbitMqOptions = new RabbitMqOptions
 {
     Host = GetEnv("RABBITMQ__HOST", "RABBITMQ_HOST") ?? "localhost",
@@ -72,9 +77,17 @@ builder.Services.AddRabbitMqEventConsumer<AlertCreatedEvent>(createdQueue);
 
 builder.Services.AddHostedService<AlertTriggeredEventConsumer>();
 builder.Services.AddHostedService<AlertCreatedEventConsumer>();
+}
+
+builder.Services.AddSimcagGatewayAuthentication(builder.Environment);
+
+builder.Services.AddSimcagProblemDetails();
 
 var app = builder.Build();
 
+app.ValidateSimcagGatewayTrustAtStartup();
+
+app.UseSimcagExceptionHandler();
 app.UseSimcagHttpCorrelationActivityTags();
 
 app.RunNotificationMigrationsOnStartup();
@@ -86,10 +99,15 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapSimcagHealthChecks();
 
 app.UseSimcagTelemetryEndpoints();
 
 app.Run();
+
+public partial class Program
+{
+}
