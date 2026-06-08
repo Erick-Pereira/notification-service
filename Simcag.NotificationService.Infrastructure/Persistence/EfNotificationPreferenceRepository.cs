@@ -26,7 +26,12 @@ public sealed class EfNotificationPreferenceRepository : INotificationPreference
     public async Task UpdateAsync(NotificationPreference preference, CancellationToken ct)
     {
         var rec = await _db.NotificationPreferences.FirstOrDefaultAsync(p => p.UserId == preference.UserId, ct);
-        if (rec == null) return;
+        if (rec == null)
+        {
+            await AddAsync(preference, ct);
+            return;
+        }
+
         var mapped = EntityMappers.ToRecord(preference);
         _db.Entry(rec).CurrentValues.SetValues(mapped);
         await _db.SaveChangesAsync(ct);

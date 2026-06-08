@@ -7,6 +7,7 @@ using Simcag.NotificationService.Application.Governance;
 using Simcag.NotificationService.Application.Mapping;
 using Simcag.NotificationService.Domain.Entities;
 using Simcag.NotificationService.Domain.Interfaces;
+using Simcag.NotificationService.Domain.ValueObjects;
 
 namespace Simcag.NotificationService.Application.Services;
 
@@ -146,7 +147,8 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
-        if (!preferences.IsSeverityEnabled(alert.Severity))
+        var eventSeverity = AlertSeverityLevel.NormalizeFromTcc(alert.Severity ?? string.Empty);
+        if (!preferences.IsSeverityEnabled(eventSeverity))
         {
             await RecordFilteredAsync($"Severidade abaixo do mínimo ({preferences.MinimumSeverity}).").ConfigureAwait(false);
             return false;
@@ -158,10 +160,18 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
-        var success = true;
+        var canEmail = preferences.EmailEnabled && !string.IsNullOrWhiteSpace(preferences.EmailAddress);
+        var canSms = preferences.SmsEnabled && !string.IsNullOrWhiteSpace(preferences.PhoneNumber);
+        if (!canEmail && !canSms)
+        {
+            await RecordFilteredAsync("Nenhum canal activo com contacto válido. Configure e-mail ou SMS nas preferências.").ConfigureAwait(false);
+            return false;
+        }
+
+        var success = false;
         var alertKeyBase = !string.IsNullOrWhiteSpace(alert.AlertId) ? alert.AlertId! : alert.OccurredAt.Ticks.ToString();
 
-        if (preferences.EmailEnabled && !string.IsNullOrWhiteSpace(preferences.EmailAddress))
+        if (canEmail)
         {
             var dedup = $"{alert.UserId}:alert:{alertKeyBase}:email";
             var rate = $"{alert.UserId}:email:alert";
@@ -191,11 +201,12 @@ public sealed class NotificationService : INotificationService
             }
             else
             {
-                success = await DispatchEmailForTrackedAsync(row, cancellationToken).ConfigureAwait(false) && success;
+                if (await DispatchEmailForTrackedAsync(row, cancellationToken).ConfigureAwait(false))
+                    success = true;
             }
         }
 
-        if (preferences.SmsEnabled && !string.IsNullOrWhiteSpace(preferences.PhoneNumber))
+        if (canSms)
         {
             var smsBody = string.IsNullOrWhiteSpace(alert.Message)
                 ? $"[{alert.AlertType}] {productLabel}: {alert.CurrentPrice:C} ({alert.PriceChange:P0} from {alert.Source})"
@@ -228,7 +239,8 @@ public sealed class NotificationService : INotificationService
             }
             else
             {
-                success = await DispatchSmsForTrackedAsync(row, cancellationToken).ConfigureAwait(false) && success;
+                if (await DispatchSmsForTrackedAsync(row, cancellationToken).ConfigureAwait(false))
+                    success = true;
             }
         }
 
@@ -552,6 +564,8 @@ public sealed class NotificationService : INotificationService
 
     public async Task UpdateUserPreferencesAsync(UpdatePreferencesDto preferences, CancellationToken cancellationToken = default)
     {
+        ValidatePreferenceUpdate(preferences);
+
         var existing = await _preferenceRepository.GetByUserIdAsync(preferences.UserId, cancellationToken).ConfigureAwait(false);
         if (existing == null)
         {
@@ -615,5 +629,23 @@ public sealed class NotificationService : INotificationService
 
             await _preferenceRepository.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static void ValidatePreferenceUpdate(UpdatePreferencesDto preferences)
+    {
+        if (preferences.EmailEnabled && string.IsNullOrWhiteSpace(preferences.EmailAddress))
+            throw new InvalidOperationException("E-mail obrigatório quando o canal de e-mail está activo.");
+
+        if (preferences.SmsEnabled && string.IsNullOrWhiteSpace(preferences.PhoneNumber))
+            throw new InvalidOperationException("Telemóvel obrigatório quando o canal SMS está activo.");
+
+        if (!preferences.EmailEnabled && !preferences.SmsEnabled)
+            throw new InvalidOperationException("Active pelo menos um canal de notificação (e-mail ou SMS).");
+
+        var drop = preferences.AlertDropEnabled ?? true;
+        var rise = preferences.AlertRiseEnabled ?? true;
+        var trend = preferences.AlertTrendEnabled ?? true;
+        if (!drop && !rise && !trend)
+            throw new InvalidOperationException("Seleccione pelo menos um tipo de alerta de preço.");
     }
 }

@@ -1,11 +1,14 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Simcag.NotificationService.Application.DTOs;
+using Simcag.NotificationService.Application.Security;
 using Simcag.NotificationService.Application.Services;
 using Simcag.Shared.Contracts;
 
 namespace Simcag.NotificationService.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/notifications")]
 [Route("notifications")]
 public class NotificationsController : ControllerBase
@@ -20,12 +23,15 @@ public class NotificationsController : ControllerBase
     }
 
     [HttpGet("preferences/{userId:guid}")]
-    public async Task<ApiResponse<PreferencesResponseDto>> GetPreferences(Guid userId, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<PreferencesResponseDto>>> GetPreferences(Guid userId, CancellationToken ct)
     {
+        if (!NotificationCallerAuthorization.CanAccessUserData(User, userId))
+            return Forbid();
+
         var preferences = await _notificationService.GetUserPreferencesAsync(userId, ct);
         if (preferences == null)
         {
-            return ApiResponse<PreferencesResponseDto>.Ok(new PreferencesResponseDto());
+            return ApiResponse<PreferencesResponseDto>.Ok(new PreferencesResponseDto { UserId = userId });
         }
 
         return ApiResponse<PreferencesResponseDto>.Ok(new PreferencesResponseDto
@@ -53,14 +59,17 @@ public class NotificationsController : ControllerBase
         ApiResponse<IReadOnlyList<NotificationTemplateDto>>.Ok(_notificationService.GetTemplates());
 
     [HttpGet("operational/dashboard")]
-    public async Task<ApiResponse<NotificationDashboardDto>> OperationalDashboard([FromQuery] Guid userId, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<NotificationDashboardDto>>> OperationalDashboard([FromQuery] Guid userId, CancellationToken ct)
     {
+        if (!NotificationCallerAuthorization.CanAccessUserData(User, userId))
+            return Forbid();
+
         var d = await _notificationService.GetOperationalDashboardAsync(userId, ct);
         return ApiResponse<NotificationDashboardDto>.Ok(d);
     }
 
     [HttpGet("deliveries")]
-    public async Task<ApiResponse<NotificationDeliveryPageDto>> Deliveries(
+    public async Task<ActionResult<ApiResponse<NotificationDeliveryPageDto>>> Deliveries(
         [FromQuery] Guid userId,
         [FromQuery] string? status,
         [FromQuery] string? channel,
@@ -68,26 +77,35 @@ public class NotificationsController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
+        if (!NotificationCallerAuthorization.CanAccessUserData(User, userId))
+            return Forbid();
+
         var d = await _notificationService.ListDeliveriesAsync(userId, status, channel, page, pageSize, ct);
         return ApiResponse<NotificationDeliveryPageDto>.Ok(d);
     }
 
     [HttpPost("deliveries/{id:guid}/retry")]
-    public async Task<ApiResponse<bool>> RetryDelivery([FromRoute] Guid id, [FromQuery] Guid userId, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<bool>>> RetryDelivery([FromRoute] Guid id, [FromQuery] Guid userId, CancellationToken ct)
     {
+        if (!NotificationCallerAuthorization.CanAccessUserData(User, userId))
+            return Forbid();
+
         var ok = await _notificationService.RetryDeliveryAsync(id, userId, ct);
         return ApiResponse<bool>.Ok(ok);
     }
 
     [HttpGet("preferences")]
-    public async Task<ApiResponse<PreferencesResponseDto>> GetPreferencesByQuery(
+    public Task<ActionResult<ApiResponse<PreferencesResponseDto>>> GetPreferencesByQuery(
         [FromQuery] Guid userId,
         CancellationToken ct = default) =>
-        await GetPreferences(userId, ct);
+        GetPreferences(userId, ct);
 
     [HttpPut("preferences")]
-    public async Task<ApiResponse<bool>> UpdatePreferences([FromBody] UpdatePreferencesDto preferences, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<bool>>> UpdatePreferences([FromBody] UpdatePreferencesDto preferences, CancellationToken ct)
     {
+        if (!NotificationCallerAuthorization.CanAccessUserData(User, preferences.UserId))
+            return Forbid();
+
         await _notificationService.UpdateUserPreferencesAsync(preferences, ct);
         return ApiResponse<bool>.Ok(true);
     }

@@ -20,8 +20,10 @@ public static class ServiceCollectionExtensions
     {
         var postgres = FirstNonEmpty(
             configuration.GetConnectionString("NotificationDb"),
+            configuration.GetConnectionString("DefaultConnection"),
             Environment.GetEnvironmentVariable("POSTGRES_CONNECTION"),
-            Environment.GetEnvironmentVariable("ConnectionStrings__NotificationDb"));
+            Environment.GetEnvironmentVariable("ConnectionStrings__NotificationDb"),
+            Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection"));
 
         if (string.IsNullOrWhiteSpace(postgres))
         {

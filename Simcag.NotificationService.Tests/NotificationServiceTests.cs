@@ -210,12 +210,45 @@ public class NotificationServiceTests
             UserId = userId,
             EmailEnabled = true,
             SmsEnabled = true,
-            EmailAddress = "new@example.com"
+            EmailAddress = "new@example.com",
+            PhoneNumber = "+1234567890",
         };
 
         await _service.UpdateUserPreferencesAsync(dto, CancellationToken.None);
 
         _preferenceRepoMock.Verify(r => r.UpdateAsync(It.Is<NotificationPreference>(p => p.EmailAddress == "new@example.com"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendAlertNotificationAsync_WithNoActiveChannels_ReturnsFalse()
+    {
+        var userId = Guid.NewGuid();
+        var preference = NotificationPreference.Create(userId, "test@example.com", "+1234567890");
+        preference.UpdatePreferences(emailEnabled: false, smsEnabled: false, emailAddress: "test@example.com", phoneNumber: "+1234567890");
+
+        _preferenceRepoMock.Setup(r => r.GetByUserIdAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preference);
+
+        var alert = CreateAlertNotification(userId);
+
+        var result = await _service.SendAlertNotificationAsync(alert);
+
+        Assert.False(result);
+        _notificationRepoMock.Verify(r => r.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateUserPreferencesAsync_RejectsAllChannelsDisabled()
+    {
+        var dto = new UpdatePreferencesDto
+        {
+            UserId = Guid.NewGuid(),
+            EmailEnabled = false,
+            SmsEnabled = false,
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.UpdateUserPreferencesAsync(dto, CancellationToken.None));
     }
 
     private static AlertNotificationDto CreateAlertNotification(

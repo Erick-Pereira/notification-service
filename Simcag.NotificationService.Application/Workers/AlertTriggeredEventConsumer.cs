@@ -32,21 +32,21 @@ public sealed class AlertTriggeredEventConsumer : BackgroundService
             using (MessagingConsumeTelemetry.BeginConsume(messageEnvelope, out _))
             {
             using var scope = _scopeFactory.CreateScope();
-            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+            var dispatch = scope.ServiceProvider.GetRequiredService<AlertNotificationDispatchService>();
             var alert = messageEnvelope.Data;
-            if (alert.UserId is null || alert.UserId == Guid.Empty)
-            {
-                _logger.LogWarning(
-                    "AlertTriggeredEvent sem UserId (alertId {AlertId}). Mensagem descartada.",
-                    alert.AlertId);
-                await _eventConsumer.AcknowledgeMessageAsync(messageEnvelope, stoppingToken);
-                continue;
-            }
+
+            _logger.LogInformation(
+                "Processing AlertTriggeredEvent alertId={AlertId} productId={ProductId}",
+                alert.AlertId,
+                alert.ProductId);
 
             try
             {
-                var dto = AlertEventMapping.ToDto(alert, correlationId: messageEnvelope.CorrelationId);
-                await notificationService.SendAlertNotificationAsync(dto, stoppingToken);
+                await dispatch.DispatchTriggeredAsync(
+                    alert,
+                    messageEnvelope.TenantId,
+                    messageEnvelope.CorrelationId,
+                    stoppingToken);
                 await _eventConsumer.AcknowledgeMessageAsync(messageEnvelope, stoppingToken);
             }
             catch (Exception ex)

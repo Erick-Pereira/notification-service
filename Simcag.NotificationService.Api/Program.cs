@@ -1,6 +1,9 @@
+using Simcag.NotificationService.Application.Abstractions;
+using Simcag.NotificationService.Application.Configuration;
 using Simcag.NotificationService.Application.Services;
 using Simcag.NotificationService.Application.Workers;
 using Simcag.NotificationService.Infrastructure.DependencyInjection;
+using Simcag.NotificationService.Infrastructure.Identity;
 using Simcag.Shared.Events;
 using Simcag.Shared.Messaging.Configuration;
 using Simcag.Shared.Messaging.Extensions;
@@ -50,6 +53,30 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddNotificationInfrastructure(builder.Configuration);
 
+static NotificationRecipientOptions ReadRecipientOptions()
+{
+    Guid? defaultUser = null;
+    var rawUser = GetEnv("NOTIFICATION__DEFAULT_NOTIFY_USER_ID", "NOTIFICATION_DEFAULT_NOTIFY_USER_ID");
+    if (!string.IsNullOrWhiteSpace(rawUser) && Guid.TryParse(rawUser.Trim(), out var parsed) && parsed != Guid.Empty)
+        defaultUser = parsed;
+
+    return new NotificationRecipientOptions
+    {
+        DefaultNotifyUserId = defaultUser,
+        DevFallbackEmail = GetEnv("NOTIFICATION__DEV_FALLBACK_EMAIL", "NOTIFICATION_DEV_FALLBACK_EMAIL"),
+    };
+}
+
+var recipientOptions = ReadRecipientOptions();
+builder.Services.AddSingleton(recipientOptions);
+
+if (isTesting)
+{
+    builder.Services.AddSingleton<IIdentityNotificationRecipientClient, NullIdentityNotificationRecipientClient>();
+}
+builder.Services.AddSingleton<IAlertNotificationRecipientResolver, AlertNotificationRecipientResolver>();
+builder.Services.AddScoped<AlertNotificationDispatchService>();
+
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHealthChecks().AddSimcagLiveSelfCheck();
 
@@ -66,17 +93,16 @@ var rabbitMqOptions = new RabbitMqOptions
 rabbitMqOptions.ApplyMessageSigningFromEnvironment();
 
 builder.Services.AddRabbitMqMessaging(rabbitMqOptions);
+builder.Services.AddRabbitMqRpcClient();
+builder.Services.AddSingleton<IIdentityNotificationRecipientClient, IdentityNotificationRecipientRpcClient>();
 
 var triggeredQueue = GetEnv("RABBITMQ_QUEUE_ALERT_TRIGGERED", "RABBITMQ__QUEUE_ALERT_TRIGGERED")
     ?? "alert-triggered-events";
-var createdQueue = GetEnv("RABBITMQ_QUEUE_ALERT_CREATED", "RABBITMQ__QUEUE_ALERT_CREATED")
-    ?? "alerts";
 
 builder.Services.AddRabbitMqEventConsumer<AlertTriggeredEvent>(triggeredQueue);
-builder.Services.AddRabbitMqEventConsumer<AlertCreatedEvent>(createdQueue);
 
 builder.Services.AddHostedService<AlertTriggeredEventConsumer>();
-builder.Services.AddHostedService<AlertCreatedEventConsumer>();
+builder.Services.AddHostedService<DevNotificationPreferenceBootstrapHostedService>();
 }
 
 builder.Services.AddSimcagGatewayAuthentication(builder.Environment);

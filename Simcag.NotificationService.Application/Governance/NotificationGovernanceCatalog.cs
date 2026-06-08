@@ -67,7 +67,7 @@ public static class NotificationGovernanceCatalog
             Channel = "Email",
             SubjectPattern = "Price Alert: {AlertType} - {ProductName}",
             BodyPattern = "{Message} + metadados (severidade, hora UTC, preços).",
-            SourceEvent = "AlertTriggeredEvent / AlertCreatedEvent",
+            SourceEvent = "AlertTriggeredEvent",
         },
         new NotificationTemplateDto
         {
@@ -75,7 +75,7 @@ public static class NotificationGovernanceCatalog
             Channel = "SMS",
             SubjectPattern = "(vazio)",
             BodyPattern = "[{AlertType}] {Product}: preço e variação truncados.",
-            SourceEvent = "AlertTriggeredEvent / AlertCreatedEvent",
+            SourceEvent = "AlertTriggeredEvent",
         },
     ];
 }
