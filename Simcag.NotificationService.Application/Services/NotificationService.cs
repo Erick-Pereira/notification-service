@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Simcag.NotificationService.Application.Branding;
 using Simcag.Shared.ErrorHandling;
 using Simcag.NotificationService.Application.Abstractions;
 using Simcag.NotificationService.Application.DTOs;
@@ -108,7 +109,7 @@ public sealed class NotificationService : INotificationService
     {
         var utc = DateTime.UtcNow;
         var productLabel = string.IsNullOrWhiteSpace(alert.ProductName) ? (alert.ProductId ?? "N/A") : alert.ProductName!;
-        var subject = $"Price Alert: {alert.AlertType} - {productLabel}";
+        var subject = NotificationBranding.AlertEmailSubject(alert.AlertType ?? "Alerta", productLabel);
         var body = BuildAlertBody(alert, productLabel);
         var contextJson = BuildContextJson(alert);
         var summary = Truncate(alert.Message ?? subject, 480);
@@ -364,6 +365,7 @@ public sealed class NotificationService : INotificationService
             {
                 alert.AlertId,
                 alert.ProductId,
+                ExpenseId = alert.ExpenseId,
                 alert.AlertType,
                 alert.AlertCategory,
                 alert.TenantId,
@@ -372,8 +374,8 @@ public sealed class NotificationService : INotificationService
 
     private static string BuildOperationalLink(AlertNotificationDto alert)
     {
-        if (!string.IsNullOrWhiteSpace(alert.ProductId))
-            return $"/insights?productId={Uri.EscapeDataString(alert.ProductId)}";
+        if (alert.ExpenseId is { } expenseId && expenseId != Guid.Empty)
+            return $"/compras/{expenseId:D}";
         if (!string.IsNullOrWhiteSpace(alert.AlertId))
             return $"/alertas?alertId={Uri.EscapeDataString(alert.AlertId)}";
         return "/alertas";
@@ -395,7 +397,7 @@ public sealed class NotificationService : INotificationService
 
         return
             $"""
-             Price Alert Notification
+             {NotificationBranding.AlertEmailBodyFallbackHeader}
              ---------------------
              Product: {productLabel}
              Alert Type: {alert.AlertType}

@@ -25,6 +25,7 @@ public static class AlertEventMapping
             Source = e.Source,
             OccurredAt = e.OccurredAt,
             CorrelationId = correlationId,
+            ExpenseId = e.ExpenseId,
         };
 
     private static decimal NormalizeDeviation(decimal deviation)

@@ -16,6 +16,7 @@ public class AlertNotificationDto
     public string Source { get; init; } = string.Empty;
     public DateTime OccurredAt { get; init; }
     public string? CorrelationId { get; init; }
+    public Guid? ExpenseId { get; init; }
 }
 
 public class UpdatePreferencesDto

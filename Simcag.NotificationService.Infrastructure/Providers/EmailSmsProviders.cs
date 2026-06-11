@@ -1,3 +1,4 @@
+using Simcag.NotificationService.Application.Branding;
 using Simcag.NotificationService.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Net;
@@ -26,13 +27,24 @@ public class SmtpEmailProvider : IEmailProvider
     public SmtpEmailProvider(ILogger<SmtpEmailProvider> logger)
     {
         _logger = logger;
+        var port = int.Parse(FirstNonEmpty("SMTP__PORT", "SMTP_PORT") ?? "587");
+        var enableSsl = bool.Parse(FirstNonEmpty("SMTP__ENABLESSL", "SMTP_ENABLESSL") ?? "true");
+        // Mailpit and other local capture servers on 1025 use plain SMTP (no STARTTLS).
+        if (port == 1025 && enableSsl)
+        {
+            logger.LogWarning("SMTP port 1025 does not support STARTTLS; using EnableSsl=false (Mailpit/local capture)");
+            enableSsl = false;
+        }
+
         _settings = new SmtpSettings
         {
             Host = FirstNonEmpty("SMTP__HOST", "SMTP_HOST") ?? "smtp.gmail.com",
-            Port = int.Parse(FirstNonEmpty("SMTP__PORT", "SMTP_PORT") ?? "587"),
+            Port = port,
+            FromAddress = FirstNonEmpty("SMTP__FROM", "SMTP_FROM") ?? "",
+            FromDisplayName = NotificationBranding.EmailSenderDisplayName,
             UserName = FirstNonEmpty("SMTP__USERNAME", "SMTP_USER") ?? "",
             Password = FirstNonEmpty("SMTP__PASSWORD", "SMTP_PASS", "SMTP__PASS") ?? "",
-            EnableSsl = bool.Parse(FirstNonEmpty("SMTP__ENABLESSL", "SMTP_ENABLESSL") ?? "true")
+            EnableSsl = enableSsl
         };
     }
 
@@ -52,9 +64,13 @@ public class SmtpEmailProvider : IEmailProvider
                 Credentials = new NetworkCredential(_settings.UserName, _settings.Password)
             };
 
+            var fromAddress = string.IsNullOrWhiteSpace(_settings.FromAddress)
+                ? _settings.UserName
+                : _settings.FromAddress;
+
             var message = new MailMessage
             {
-                From = new MailAddress(_settings.UserName, "SIMC-AG Price Alerts"),
+                From = new MailAddress(fromAddress, _settings.FromDisplayName),
                 Subject = subject,
                 Body = body,
                 IsBodyHtml = false
@@ -76,6 +92,8 @@ public class SmtpEmailProvider : IEmailProvider
     {
         public string Host { get; init; } = string.Empty;
         public int Port { get; init; }
+        public string FromAddress { get; init; } = string.Empty;
+        public string FromDisplayName { get; init; } = NotificationBranding.ProductName;
         public string UserName { get; init; } = string.Empty;
         public string Password { get; init; } = string.Empty;
         public bool EnableSsl { get; init; }

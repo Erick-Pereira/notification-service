@@ -65,7 +65,7 @@ public static class NotificationGovernanceCatalog
         {
             Code = "price-alert-email",
             Channel = "Email",
-            SubjectPattern = "Price Alert: {AlertType} - {ProductName}",
+            SubjectPattern = "Econdomiza — Alerta: {AlertType} — {ProductName}",
             BodyPattern = "{Message} + metadados (severidade, hora UTC, preços).",
             SourceEvent = "AlertTriggeredEvent",
         },
